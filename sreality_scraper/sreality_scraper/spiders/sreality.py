@@ -1,4 +1,5 @@
 import math
+from unicodedata import normalize
 from w3lib.url import add_or_replace_parameter
 
 import jmespath
@@ -17,6 +18,7 @@ class SrealityCzSpider(Spider):
     BASE_OFFER_URL = 'https://www.sreality.cz/detail'
     BASE_API_URL = 'https://www.sreality.cz/api'
     ESTATES_API_URL = 'https://www.sreality.cz/api/cs/v2/estates'
+    PRICE_CURRENCY = 'Kč'
 
     DEFAULT_N_RESULTS_PER_PAGE = 60
 
@@ -40,7 +42,7 @@ class SrealityCzSpider(Spider):
         # Identity
         offer_id = self._parse_offer_id_from_url(response.url)
         loader.add_value('id', offer_id)
-        loader.add_jpath('title', 'name.value', data)
+        loader.add_value('title', self._parse_title(data))
         loader.add_value('url', self._parse_url(data, offer_id))
         loader.add_value('deal_code', self._parse_deal_code(data))
         loader.add_value('property_code', self._parse_property_code(data))
@@ -57,7 +59,8 @@ class SrealityCzSpider(Spider):
 
         # Price
         loader.add_jpath('price_amount', 'price_czk.value_raw', data)
-        loader.add_value('currency', 'Kč')
+        loader.add_value('currency', self.PRICE_CURRENCY)
+        loader.add_value('price', self._parse_price(data))
 
         # Seller
         seller_data = jmespath.search('_embedded.seller', data)
@@ -69,6 +72,10 @@ class SrealityCzSpider(Spider):
     def _parse_offer_id_from_url(url):
         path = get_url_path(url)
         return path[-1]
+
+    def _parse_title(self, data):
+        title = jmespath.search('name.value', data) or ''
+        return normalize('NFKD', title)
 
     def _parse_url(self, data, offer_id):
         # getAppUrl_propertyDetail from all.js
@@ -115,7 +122,112 @@ class SrealityCzSpider(Spider):
         return category_main_cb_en.get(code)
 
     def _parse_features(self, data):
-        pass
+        features = {}
+        features_data = jmespath.search('items[]', data) or []
+        for feature_data in features_data:
+            name = jmespath.search('name', feature_data)
+            features[name] = self._parse_feature_value(feature_data)
+        return features
+
+    def _parse_feature_value(self, feature_data):
+        type = jmespath.search('type', feature_data)
+        if type == 'set':
+            return self._parse_feature_set_value(feature_data)
+        elif type == 'price':
+            return self._parse_feature_price_value(feature_data)
+        elif type == 'price_info':
+            return self._parse_feature_price_info_value(feature_data)
+        elif type == 'price_czk':
+            return self._parse_feature_price_czk_value(feature_data)
+        elif type in ['price_czk_m2', 'price_czk_old']:
+            return self._parse_feature_price_czk_old_value(feature_data)
+        elif type == 'boolean':
+            return self._parse_feature_boolean_value(feature_data)
+        elif type in ['url', 'energy_performance_attachment']:
+            return self._parse_feature_url_value(feature_data)
+        elif type == 'energy_performance':
+            return self._parse_feature_energy_performance_value(feature_data)
+        else:
+            return self._parse_feature_other_value(feature_data)
+
+    def _parse_feature_set_value(self, feature_data):
+        values = jmespath.search('value[].value', feature_data) or []
+        return ', '.join(values)
+
+    def _parse_feature_price_value(self, feature_data):
+        value = jmespath.search('value', feature_data) or ''
+        value = normalize('NFKD', str(value))
+        currency = jmespath.search('currency', feature_data)
+        if currency:
+            value = ' '.join((value, currency))
+        unit = jmespath.search('unit', feature_data)
+        if unit:
+            value = ' '.join((value, unit))
+        return value
+
+    def _parse_feature_price_info_value(self, feature_data):
+        value = jmespath.search('value', feature_data) or ''
+        value = normalize('NFKD', str(value))
+        negotiation = jmespath.search('negotiation', feature_data)
+        if negotiation:
+            value = ' '.join((value, NEGOTIATION_TEXT))
+        return value
+
+    def _parse_feature_price_czk_value(self, feature_data):
+        value = self._parse_feature_price_czk_old_value(feature_data)
+        negotiation = jmespath.search('negotiation', feature_data)
+        if negotiation:
+            value = ' '.join((value, NEGOTIATION_TEXT))
+        return value
+
+    def _parse_feature_price_czk_old_value(self, feature_data):
+        value = jmespath.search('value', feature_data) or ''
+        value = normalize('NFKD', str(value))
+        currency = jmespath.search('currency', feature_data)
+        value = ' '.join((value, currency))
+        foreign_value = jmespath.search('foreign_value', feature_data)
+        if foreign_value:
+            value = ' ('.join((value, foreign_value))
+            foreign_currency = jmespath.search(
+                'foreign_currency', feature_data)
+            if foreign_currency:
+                value = ' '.join((value, foreign_currency))
+            value = value + ')'
+        unit = jmespath.search('unit', feature_data)
+        if unit:
+            value = ' '.join((value, unit))
+        return value
+
+    def _parse_feature_boolean_value(self, feature_data):
+        value = jmespath.search('value', feature_data)
+        return 'Yes' if value else 'No'
+
+    def _parse_feature_url_value(self, feature_data):
+        url = jmespath.search('url', feature_data)
+        return url
+
+    def _parse_feature_energy_performance_value(self, feature_data):
+        value = jmespath.search('value', feature_data) or ''
+        unit = jmespath.search('unit', feature_data) or ''
+        unit2 = jmespath.search('unit2', feature_data) or ''
+        list_data = (value, unit, unit2)
+        return ' '.join((str(value) for value in list_data if value))
+
+    def _parse_feature_other_value(self, feature_data):
+        value = jmespath.search('value', feature_data) or ''
+        unit = jmespath.search('unit', feature_data) or ''
+        list_data = (value, unit)
+        return ' '.join((str(value) for value in list_data if value))
+
+    def _parse_price(self, data):
+        value = jmespath.search('price_czk.value', data) or ''
+        value = normalize('NFKD', value)
+        unit = jmespath.search('price_czk.unit', data)
+        price_data = (value, self.PRICE_CURRENCY, unit)
+        price = ' '.join((value for value in price_data if value))
+        if value:
+            return price
+        return 'Info o ceně u RK'
 
     def process_offer_urls(self):
         offer_urls = self.offer_urls.split('|||')
@@ -171,4 +283,5 @@ class SrealityCzSpider(Spider):
     def _parse_offer_api_urls(self, data):
         jpath = '_embedded.estates[]._links.self.href'
         links = jmespath.search(jpath, data)
-        return ['/'.join((self.BASE_API_URL, link)) for link in links]
+        return ['/'.join((self.BASE_API_URL, link.strip('/')))
+                for link in links]

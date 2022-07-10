@@ -145,3 +145,4 @@ category_sub_cb_detail = {
     53: 'mobilni-domek',
     36: 'jine-nemovitosti'
 }
+NEGOTIATION_TEXT = '(k jednání)'
