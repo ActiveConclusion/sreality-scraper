@@ -1,20 +1,30 @@
+import math
+from w3lib.url import add_or_replace_parameter
+
 import jmespath
 from scrapy import Spider, Request
 
 from sreality_scraper.items import OfferItem
 from sreality_scraper.loaders import OfferLoader
-from sreality_scraper.utils import get_url_path
+from sreality_scraper.site_state_data import *
+from sreality_scraper.utils import get_url_path, reverse_dict_keys_values
 
 
 class SrealityCzSpider(Spider):
     name = 'sreality_cz'
     allowed_domains = ['sreality.cz']
 
+    BASE_API_URL = 'https://www.sreality.cz/api'
     ESTATES_API_URL = 'https://www.sreality.cz/api/cs/v2/estates'
+
+    DEFAULT_N_RESULTS_PER_PAGE = 60
 
     def __init__(self, *args, **kwargs):
         self.offer_urls = kwargs.get('offer_urls')
         self.offers_pages = kwargs.get('offers_pages')
+        self.n_results_per_page = int(kwargs.get(
+            'n_results_per_page', self.DEFAULT_N_RESULTS_PER_PAGE))
+        self.num_pages = int(kwargs.get('num_pages', 0))
 
     def start_requests(self):
         if self.offer_urls:
@@ -79,3 +89,50 @@ class SrealityCzSpider(Spider):
                 '/'.join((self.ESTATES_API_URL, offer_id)),
                 self.parse_offer,
             )
+
+    def process_offers_pages(self):
+        offers_pages = self.offers_pages.split('|||')
+        for offers_page in offers_pages:
+            return self.make_offers_page_request(offers_page)
+
+    def make_offers_page_request(self, offers_page):
+        category_params = self._parse_category_params_from_url(offers_page)
+        url = self.ESTATES_API_URL
+        for key, value in category_params.items():
+            url = add_or_replace_parameter(url, key, value)
+        url = add_or_replace_parameter(
+            url, 'per_page', self.n_results_per_page)
+        yield Request(url, self.parse_offers_page)
+
+    def parse_offers_page(self, response):
+        data = response.json()
+        offer_api_urls = self._parse_offer_api_urls(data)
+        for offer_api_url in offer_api_urls:
+            yield Request(offer_api_url, self.parse_offer)
+        yield self.make_next_offers_page_request(response, data)
+
+    def make_next_offers_page_request(self, response, data):
+        total_matches = data.get('result_size')
+        current_page = data.get('page')
+        total_pages = math.ceil(total_matches / self.n_results_per_page)
+        if self.num_pages:
+            total_pages = min(self.num_pages, total_pages)
+        if current_page < total_pages:
+            next_page = current_page + 1
+            url = add_or_replace_parameter(response.url, 'page', next_page)
+            return Request(url, self.parse_offers_page)
+
+    def _parse_category_params_from_url(self, offers_page):
+        path = get_url_path(offers_page)
+        category_type, category_main = path[-2:]
+        category_type_data_rev = reverse_dict_keys_values(category_type_cb)
+        category_main_data_rev = reverse_dict_keys_values(category_main_cb)
+        return {
+            'category_type_cb': category_type_data_rev.get(category_type),
+            'category_main_cb': category_main_data_rev.get(category_main),
+        }
+
+    def _parse_offer_api_urls(self, data):
+        jpath = '_embedded.estates[]._links.self.href'
+        links = jmespath.search(jpath, data)
+        return ['/'.join((self.BASE_API_URL, link)) for link in links]
