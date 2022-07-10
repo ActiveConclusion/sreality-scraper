@@ -14,6 +14,7 @@ class SrealityCzSpider(Spider):
     name = 'sreality_cz'
     allowed_domains = ['sreality.cz']
 
+    BASE_OFFER_URL = 'https://www.sreality.cz/detail'
     BASE_API_URL = 'https://www.sreality.cz/api'
     ESTATES_API_URL = 'https://www.sreality.cz/api/cs/v2/estates'
 
@@ -37,9 +38,10 @@ class SrealityCzSpider(Spider):
 
         loader = OfferLoader(item=OfferItem())
         # Identity
-        loader.add_value('id', self._parse_offer_id_from_url(response.url))
+        offer_id = self._parse_offer_id_from_url(response.url)
+        loader.add_value('id', offer_id)
         loader.add_jpath('title', 'name.value', data)
-        loader.add_value('url', self._parse_url(data))
+        loader.add_value('url', self._parse_url(data, offer_id))
         loader.add_value('deal_code', self._parse_deal_code(data))
         loader.add_value('property_code', self._parse_property_code(data))
 
@@ -68,15 +70,49 @@ class SrealityCzSpider(Spider):
         path = get_url_path(url)
         return path[-1]
 
-    def _parse_url(self, data):
+    def _parse_url(self, data, offer_id):
         # getAppUrl_propertyDetail from all.js
-        pass
+        category_type_name = self._parse_url_category_type_name(data)
+        category_main_name = self._parse_url_category_main_name(data)
+        category_sub_name = self._parse_url_category_sub_name(data)
+        locality = jmespath.search('seo.locality', data)
+        return '/'.join((
+            self.BASE_OFFER_URL,
+            category_type_name,
+            category_main_name,
+            category_sub_name,
+            locality,
+            offer_id,
+        ))
+
+    def _parse_url_category_type_name(self, data):
+        code = self._parse_category_type_code(data)
+        return category_type_cb_detail.get(code) or 'undefined'
+
+    def _parse_category_type_code(self, data):
+        return jmespath.search('seo.category_type_cb', data)
+
+    def _parse_url_category_main_name(self, data):
+        code = self._parse_category_main_code(data)
+        return category_main_cb_detail.get(code) or 'undefined'
+
+    def _parse_category_main_code(self, data):
+        return jmespath.search('seo.category_main_cb', data)
+
+    def _parse_url_category_sub_name(self, data):
+        code = self._parse_category_sub_code(data)
+        return category_sub_cb_detail.get(code) or 'undefined'
+
+    def _parse_category_sub_code(self, data):
+        return jmespath.search('seo.category_sub_cb', data)
 
     def _parse_deal_code(self, data):
-        pass
+        code = self._parse_category_type_code(data)
+        return category_type_cb_en.get(code)
 
     def _parse_property_code(self, data):
-        pass
+        code = self._parse_category_main_code(data)
+        return category_main_cb_en.get(code)
 
     def _parse_features(self, data):
         pass

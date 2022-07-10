@@ -4,12 +4,18 @@ category_type_cb = {
     2: 'pronajem',
     3: 'drazby'
 }
+category_type_cb_en = {
+    0: 'all',
+    1: 'sale',
+    2: 'rent',
+    3: 'auction'
+}
 category_type_cb_detail = {
     0: 'vse',
     1: 'prodej',
     2: 'pronajem',
     3: 'drazby'
-},
+}
 category_main_cb = {
     0: 'vse',
     1: 'byty',
@@ -18,6 +24,15 @@ category_main_cb = {
     4: 'komercni',
     5: 'ostatni'
 }
+category_main_cb_en = {
+    0: 'all',
+    1: 'apartment',
+    2: 'house',
+    3: 'land',
+    4: 'commercial',
+    5: 'other'
+}
+
 category_main_cb_detail = {
     0: 'vse',
     1: 'byt',
